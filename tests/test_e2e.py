@@ -109,3 +109,38 @@ def test_pipeline_infers_and_broadcasts_to_db():
         for r in receipts:
             assert r.pharmacy_id is not None
             assert r.distance_km is not None
+
+
+def test_telegram_webhook_ingest_and_broadcast():
+    """Telegram webhook receives update, parses prescription via Gemini, and broadcasts."""
+    with patch("httpx.AsyncClient.post", new=fake_post):
+        with TestClient(app) as c:
+            r = c.post(
+                "/webhook/telegram",
+                json={
+                    "update_id": 9999,
+                    "message": {
+                        "message_id": 1,
+                        "chat": {"id": 12345678},
+                        "text": "Need Paracetamol 500mg x2",
+                        "location": {"latitude": 12.9352, "longitude": 77.6245},
+                    },
+                },
+            )
+            assert r.status_code == 200
+            assert r.json()["ok"] is True
+            oid = r.json()["order_id"]
+
+    with Session(engine) as s:
+        order = s.get(Order, oid)
+        assert order is not None
+        assert order.prescription_text is not None
+        parsed = json.loads(order.prescription_text)
+        assert parsed["medicines"][0]["name"] == "Paracetamol"
+
+        # Verify broadcast receipts created for Telegram order
+        receipts = s.exec(
+            select(BroadcastReceipt).where(BroadcastReceipt.order_id == oid)
+        ).all()
+        assert len(receipts) >= 1
+

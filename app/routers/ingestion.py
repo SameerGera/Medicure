@@ -3,6 +3,7 @@
 Validates Twilio request signatures when credentials are configured,
 then delegates to the ingest pipeline.
 """
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlmodel import Session
 
@@ -83,3 +84,97 @@ async def twilio_webhook(
         "</Response>"
     )
     return Response(content=twiml, media_type="application/xml")
+
+
+async def _get_telegram_file_url(bot_token: str, file_id: str) -> str | None:
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={file_id}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                file_path = data.get("result", {}).get("file_path")
+                if file_path:
+                    return f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+    except Exception:
+        pass
+    return None
+
+
+@router.post("/telegram")
+async def telegram_webhook(
+    request: Request,
+    session: Session = Depends(get_session),
+) -> dict:
+    """Telegram Bot webhook for receiving prescriptions from patients."""
+    settings = get_settings()
+    data = await request.json()
+    message = data.get("message") or data.get("edited_message")
+    if not message:
+        return {"ok": True}
+
+    chat_id = message.get("chat", {}).get("id")
+    if not chat_id:
+        return {"ok": True}
+
+    # Store user identity as tg:<chat_id>
+    phone = f"tg:{chat_id}"
+
+    body = message.get("text") or message.get("caption") or ""
+    media_urls = []
+
+    if message.get("photo") and settings.telegram_bot_token:
+        best_photo = message["photo"][-1]
+        file_id = best_photo.get("file_id")
+        if file_id:
+            file_url = await _get_telegram_file_url(settings.telegram_bot_token, file_id)
+            if file_url:
+                media_urls.append(file_url)
+
+    lat = None
+    lon = None
+    if message.get("location"):
+        lat = message["location"].get("latitude")
+        lon = message["location"].get("longitude")
+
+    order = await handle_incoming_message(
+        session=session,
+        phone=phone,
+        body=body,
+        media_urls=media_urls,
+        lat=lat,
+        lon=lon,
+    )
+
+    # Acknowledge directly to the user in Telegram
+    if settings.telegram_bot_token:
+        try:
+            send_url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(
+                    send_url,
+                    json={
+                        "chat_id": chat_id,
+                        "text": f"💊 Received your prescription (Order #{order.id})!\nScanning nearby pharmacies...",
+                    },
+                )
+        except Exception:
+            pass
+
+    return {"ok": True, "order_id": order.id}
+
+
+@router.get("/telegram/setup")
+async def setup_telegram_webhook(
+    url: str | None = None,
+) -> dict:
+    """One-click Telegram webhook registration."""
+    settings = get_settings()
+    if not settings.telegram_bot_token:
+        raise HTTPException(status_code=400, detail="TELEGRAM_BOT_TOKEN is not configured")
+    webhook_url = url or f"{settings.public_base_url}/webhook/telegram"
+    api_url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/setWebhook"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(api_url, json={"url": webhook_url})
+        return resp.json()
+

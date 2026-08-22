@@ -87,7 +87,7 @@ async def _fetch_media(url: str) -> tuple[str, str]:
     settings = get_settings()
     auth = (
         (settings.twilio_account_sid, settings.twilio_auth_token)
-        if settings.twilio_account_sid
+        if settings.twilio_account_sid and "twilio.com" in url
         else None
     )
     async with httpx.AsyncClient(timeout=20.0) as client:

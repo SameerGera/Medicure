@@ -8,10 +8,13 @@ logged (demo mode) instead of raising, so the claim still succeeds.
 """
 import json
 
+import httpx
+from sqlmodel import Session
+
 from app.config import get_settings
 from app.geo import haversine_km
 from app.models import Order, Pharmacy, User
-from sqlmodel import Session
+
 
 
 def _maps_url(pharmacy: Pharmacy) -> str:
@@ -74,7 +77,24 @@ async def route_patient_to_pharmacy(
         f"Thank you for using Medicure."
     )
 
-    await _send_whatsapp(user.phone_number, text)
+    if user.phone_number.startswith("tg:"):
+        chat_id = user.phone_number.replace("tg:", "")
+        await _send_telegram(chat_id, text)
+    else:
+        await _send_whatsapp(user.phone_number, text)
+
+
+async def _send_telegram(chat_id: str, body: str) -> None:
+    settings = get_settings()
+    if not settings.telegram_bot_token:
+        print(f"[notify:telegram:demo] -> {chat_id}: {body}")
+        return
+    try:
+        url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(url, json={"chat_id": chat_id, "text": body})
+    except Exception as exc:
+        print(f"[notify:telegram:error] failed to message {chat_id}: {exc}")
 
 
 async def _send_whatsapp(to_phone: str, body: str) -> None:

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "medicure"
+version = "0.1.0"
+description = "Hyper-local, real-time medicine dispatch network (hackathon prototype)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlmodel",
+    "twilio",
+    "openai",
+    "httpx",
+    "python-dotenv",
+    "pydantic-settings",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx"]
+
+[tool.setuptools]
+packages = ["app"]

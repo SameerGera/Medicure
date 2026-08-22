@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+sqlmodel
+twilio
+openai
+httpx
+python-dotenv
+pydantic-settings

@@ -1,4 +1,4 @@
-﻿var state = '';
+﻿var state = 'active';
 var lastHash = '';
 
 document.getElementById('phname').textContent = PHARMACY_NAME;
@@ -18,7 +18,7 @@ function renderOrders(orders, activeTab) {
     if (activeTab === 'history') {
       c.innerHTML = '<div class=empty>No fulfilled orders yet.<br>Orders you\'ve completed will appear here.</div>';
     } else {
-      c.innerHTML = '<div class=empty>No pending orders yet.<br>Tap <b>Simulate order</b> or <b>Demo broadcast</b> to start.</div>';
+      c.innerHTML = '<div class=empty>No pending orders yet.<br>Click <b>Demo broadcast to all vendors</b> to start.</div>';
     }
     return;
   }
@@ -28,8 +28,8 @@ function renderOrders(orders, activeTab) {
     var cardClass = 'card ' + o.state;
 
     var badges = '';
-    if (o.distance_km != null) badges += '<span class="badge dist">' + o.distance_km + ' km</span>';
-    if (o.estimated_value) badges += '<span class="badge val">~' + o.estimated_value + '</span>';
+    if (o.distance_km != null) badges += '<span class=badge dist>' + o.distance_km + ' km</span>';
+    if (o.estimated_value) badges += '<span class=badge val>~' + o.estimated_value + '</span>';
     if (o.state === 'partial') {
       var claimedHere = 0;
       if (o.claimed_medicines) {
@@ -55,8 +55,20 @@ function renderOrders(orders, activeTab) {
     }
 
     var actions = '';
-    if (o.state === 'pending' || o.state === 'partial') {
+    if (o.state === 'pending') {
       actions = '<button class=btn onclick="claim(' + o.order_id + ',false)">Claim all</button><button class=btn-sec onclick="claim(' + o.order_id + ',true)">Claim selected</button>';
+    } else if (o.state === 'partial') {
+      var claimedHere = 0;
+      if (o.claimed_medicines) {
+        for (var j = 0; j < o.claimed_medicines.length; j++) {
+          if (o.claimed_medicines[j].pharmacy_id === PID) claimedHere = o.claimed_medicines[j].medicines.length;
+        }
+      }
+      if (claimedHere > 0) {
+        actions = '<button class=btn-fulfill onclick="fulfill(' + o.order_id + ')">Fulfilled</button>';
+      } else {
+        actions = '<button class=btn onclick="claim(' + o.order_id + ',false)">Claim all</button><button class=btn-sec onclick="claim(' + o.order_id + ',true)">Claim selected</button>';
+      }
     } else if (o.state === 'won') {
       actions = '<button class=btn-fulfill onclick="fulfill(' + o.order_id + ')">Fulfilled</button>';
     }
@@ -95,25 +107,19 @@ function poll() {
     });
 }
 
-function simulate() {
-  document.getElementById('sim').disabled = true;
-  fetch('/vendor/' + PID + '/simulate', { method: 'POST' })
-    .then(function() { lastHash = ''; poll(); })
-    .then(function() { document.getElementById('sim').disabled = false; });
-}
-
 function demoBroadcast() {
-  document.getElementById('demo').disabled = true;
-  document.getElementById('demo').textContent = 'Broadcasting...';
+  var btn = document.getElementById('demo');
+  btn.disabled = true;
+  btn.textContent = 'Broadcasting...';
   fetch('/vendor/demo/broadcast')
     .then(function(r) { return r.json(); })
     .then(function(d) {
       lastHash = '';
       poll();
-      document.getElementById('demo').textContent = 'Broadcast sent to ' + d.broadcast_to + ' vendors!';
+      btn.textContent = 'Sent to ' + d.broadcast_to + ' vendors!';
       setTimeout(function() {
-        document.getElementById('demo').disabled = false;
-        document.getElementById('demo').textContent = 'Demo broadcast to all vendors';
+        btn.disabled = false;
+        btn.textContent = 'Demo broadcast to all vendors';
       }, 2000);
     });
 }
@@ -143,7 +149,7 @@ function fulfill(orderId) {
 }
 
 function switchTab(t) {
-  state = t === 'history' ? 'history' : '';
+  state = t;
   lastHash = '';
   document.querySelectorAll('.tab').forEach(function(el) {
     el.classList.toggle('active', el.getAttribute('data-tab') === t);

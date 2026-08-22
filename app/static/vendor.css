@@ -41,8 +41,6 @@ header{background:linear-gradient(135deg,#10b981,#059669);color:#fff;padding:16p
 .btn-row{display:flex;gap:8px;flex-wrap:wrap}
 .btn-fulfill{background:#8b5cf6;color:#fff;border:0;border-radius:11px;padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer;transition:.15s;box-shadow:0 2px 6px rgba(139,92,246,.3)}
 .btn-fulfill:hover{background:#7c3aed}
-.btn-demo{background:#6366f1;color:#fff;border:0;border-radius:11px;padding:11px 17px;font-weight:700;font-size:14px;cursor:pointer;transition:.15s;box-shadow:0 2px 6px rgba(99,102,241,.3)}
-.btn-demo:hover{background:#4f46e5}
 .tabs{display:flex;gap:0;margin-bottom:16px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card)}
 .tab{flex:1;padding:10px;border:0;background:transparent;font-weight:700;font-size:14px;color:var(--muted);cursor:pointer;transition:.15s}
 .tab.active{background:var(--primary);color:#fff}

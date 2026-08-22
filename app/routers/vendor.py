@@ -1,4 +1,4 @@
-﻿"""Vendor web dashboard + broadcast receiver.
+"""Vendor web dashboard + broadcast receiver.
 
 This is a single-app prototype: the same FastAPI process both dispatches
 orders AND serves the vendor UI. Each pharmacy points its webhook_url at
@@ -21,6 +21,7 @@ from app.config import get_settings
 from app.database import get_session
 from app.geo import all_active_pharmacies, haversine_km
 from app.models import Order, OrderStatus, Pharmacy
+from app.routers.orders import _all_claimed_indices, _total_medicines
 
 router = APIRouter(prefix="/vendor", tags=["vendor"])
 
@@ -189,10 +190,12 @@ def dashboard(pharmacy_id: int, session: Session = Depends(get_session)):
 @router.get("/{pharmacy_id}/orders")
 def vendor_orders(
     pharmacy_id: int,
-    status: str = "active",
+    status: str | None = None,
     session: Session = Depends(get_session),
 ):
     """Return orders for this pharmacy. status=active|history|all."""
+    if not status:
+        status = "active"
     ph = session.get(Pharmacy, pharmacy_id)
     if ph is None:
         raise HTTPException(status_code=404, detail="pharmacy not found")
@@ -203,20 +206,46 @@ def vendor_orders(
         if order is None:
             continue
 
-        # Compute display state
-        if order.status == OrderStatus.COMPLETED:
-            state = "completed"
-        elif order.status == OrderStatus.PARTIAL:
-            state = "partial"
-        elif order.status in (OrderStatus.CLAIMED, OrderStatus.COMPLETED):
-            state = "won" if order.claimed_by_pharmacy_id == pharmacy_id else "lost"
+        # Compute display state RELATIVE TO THIS pharmacy.
+        # Each vendor has an independent view of the same broadcast order.
+        my_claimed_entries = []
+        if order.claimed_medicines:
+            try:
+                for e in json.loads(order.claimed_medicines):
+                    if e.get("pharmacy_id") == pharmacy_id:
+                        my_claimed_entries.append(e)
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+        fulfilled = []
+        if order.fulfilled_by:
+            try:
+                fulfilled = json.loads(order.fulfilled_by)
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        i_fulfilled = pharmacy_id in fulfilled
+        i_claimed = len(my_claimed_entries) > 0
+
+        if i_claimed and i_fulfilled:
+            state = "completed"      # I fulfilled my part -> done for me
+        elif i_claimed and not i_fulfilled:
+            state = "partial"        # I claimed, can still fulfill
         else:
-            state = "pending"
+            # I never claimed anything on this order.
+            all_claimed = _all_claimed_indices(order)
+            total = _total_medicines(order)
+            if len(all_claimed) >= total and total > 0:
+                state = "lost"       # everything taken by others
+            else:
+                state = "pending"    # still medicines available for me
 
         # Filter based on status query
-        if status == "active" and state in ("completed", "lost"):
+        # "lost" orders where we never claimed → skip entirely (not our history)
+        if state == "lost":
             continue
-        if status == "history" and state not in ("completed", "lost"):
+        if status == "active" and state == "completed":
+            continue
+        if status == "history" and state != "completed":
             continue
 
         distance = None

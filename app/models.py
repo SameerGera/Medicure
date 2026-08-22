@@ -54,6 +54,8 @@ class Order(SQLModel, table=True):
     )
     # Partial-claim tracking. JSON: {"pharmacy_id": int, "medicines": [indices]}
     claimed_medicines: str | None = Field(default=None)
+    # Pharmacies that have fulfilled their claimed portion. JSON: [pharmacy_id, ...]
+    fulfilled_by: str | None = Field(default=None)
 
     user: User | None = Relationship(back_populates="orders")
     claimed_by: Pharmacy | None = Relationship(back_populates="claimed_orders")

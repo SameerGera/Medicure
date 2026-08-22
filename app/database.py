@@ -17,7 +17,7 @@ engine = create_engine(settings.database_url, connect_args=connect_args, echo=Fa
 
 def create_db_and_tables() -> None:
     # Import models so they are registered on the metadata before create_all.
-    from app import models  # noqa: F401
+    import app.models  # noqa: F401
 
     SQLModel.metadata.create_all(engine)
 

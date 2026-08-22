@@ -1,4 +1,4 @@
-﻿import json
+import json
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 from app.database import engine
@@ -52,3 +52,34 @@ def test_partial_claim():
         r2 = c.post(f"/claim/{oid}", json={"pharmacy_id": 1, "medicine_indices": [1]})
         assert r2.status_code == 200
         assert r2.json()["status"] == "claimed"
+
+
+def test_per_vendor_state_is_independent():
+    """A vendor's fulfilled order must not appear as 'completed' for another
+    vendor who never interacted. Each vendor has an independent view."""
+    with TestClient(app) as c:
+        c.get("/vendor/setup")
+        demo = c.get("/vendor/demo/broadcast").json()
+        oid = demo["order_id"]
+        total_meds = len(demo["medicines"])
+        # Vendor 1 partially claims medicine[0] and fulfills.
+        c.post(f"/claim/{oid}", json={"pharmacy_id": 1, "medicine_indices": [0]})
+        f1 = c.post(f"/orders/{oid}/fulfill", json={"pharmacy_id": 1})
+        assert f1.status_code == 200
+
+        # Vendor 1 sees it as completed -> removed from active, in history.
+        v1_active = c.get(f"/vendor/1/orders?status=active").json()
+        assert all(o["order_id"] != oid for o in v1_active)
+        v1_hist = c.get(f"/vendor/1/orders?status=history").json()
+        assert any(o["order_id"] == oid and o["state"] == "completed" for o in v1_hist)
+
+        # Vendor 2 (never claimed) must NOT see it as completed.
+        v2_active = c.get(f"/vendor/2/orders?status=active").json()
+        o2 = [o for o in v2_active if o["order_id"] == oid]
+        assert len(o2) == 1
+        assert o2[0]["state"] != "completed"
+        # Vendor 2 claims ALL remaining medicines (indices 1..N-1).
+        remaining = list(range(1, total_meds))
+        r2 = c.post(f"/claim/{oid}", json={"pharmacy_id": 2, "medicine_indices": remaining})
+        assert r2.status_code == 200
+        assert r2.json()["medicines_remaining"] == 0

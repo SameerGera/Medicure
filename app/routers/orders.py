@@ -48,25 +48,25 @@ async def claim_order(
     order = session.get(Order, order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
-    if order.status not in (OrderStatus.PENDING, OrderStatus.PARTIAL):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Order already claimed by pharmacy {order.claimed_by_pharmacy_id}",
-        )
 
     total = _total_medicines(order)
-    requested = body.medicine_indices
+    already_claimed = _all_claimed_indices(order)
 
-    if requested is None:
-        # Claim ALL remaining medicines.
-        indices = list(range(total))
-    else:
-        # Claim only the requested subset.
-        already = _all_claimed_indices(order)
-        indices = [i for i in requested if i not in already and 0 <= i < total]
-
-    if not indices:
-        raise HTTPException(status_code=400, detail="No available medicines to claim")
+    # An order can be claimed as long as there are unclaimed medicines.
+    # Status COMPLETED means a pharmacy fulfilled their part, but other
+    # pharmacies may still claim the remaining unclaimed medicines.
+    if order.status == OrderStatus.COMPLETED and len(already_claimed) >= total:
+        raise HTTPException(
+            status_code=409,
+            detail="Order fully fulfilled.",
+        )
+    if order.status not in (
+        OrderStatus.PENDING,
+        OrderStatus.PARTIAL,
+        OrderStatus.CLAIMED,
+        OrderStatus.COMPLETED,
+    ):
+        raise HTTPException(status_code=409, detail="Order is not claimable.")
 
     existing_entries = []
     if order.claimed_medicines:
@@ -74,16 +74,47 @@ async def claim_order(
             existing_entries = json.loads(order.claimed_medicines)
         except (json.JSONDecodeError, AttributeError):
             existing_entries = []
+    my_existing = [e for e in existing_entries if e.get("pharmacy_id") == pharmacy.id]
+
+    requested = body.medicine_indices
+    if requested is None:
+        # Claim ALL remaining medicines.
+        indices = [i for i in range(total) if i not in already_claimed]
+    else:
+        # Claim only the requested subset.
+        indices = [i for i in requested if i not in already_claimed and 0 <= i < total]
+
+    if not indices:
+        if my_existing:
+            raise HTTPException(
+                status_code=400, detail="You have already claimed medicines on this order"
+            )
+        raise HTTPException(
+            status_code=409, detail="Order already claimed by another pharmacy"
+        )
 
     existing_entries.append({"pharmacy_id": pharmacy.id, "medicines": indices})
 
     all_claimed = _all_claimed_indices(order)
     all_claimed.update(indices)
-    new_status = OrderStatus.CLAIMED if len(all_claimed) >= total else OrderStatus.PARTIAL
+    if len(all_claimed) >= total:
+        new_status = OrderStatus.CLAIMED
+    else:
+        new_status = OrderStatus.PARTIAL
 
+    # Build WHERE clause that allows claiming on PENDING/PARTIAL/CLAIMED/COMPLETED
+    # as long as unclaimed medicines remain (prevents double-claim races).
     stmt = (
         update(Order)
-        .where(Order.id == order_id, Order.status.in_([OrderStatus.PENDING, OrderStatus.PARTIAL]))
+        .where(
+            Order.id == order_id,
+            Order.status.in_([
+                OrderStatus.PENDING,
+                OrderStatus.PARTIAL,
+                OrderStatus.CLAIMED,
+                OrderStatus.COMPLETED,
+            ]),
+        )
         .values(
             status=new_status,
             claimed_by_pharmacy_id=pharmacy.id,
@@ -131,16 +162,43 @@ def fulfill_order(
     body: ClaimRequest,
     session: Session = Depends(get_session),
 ) -> dict:
-    """Mark an order as fulfilled/completed. Only the claiming pharmacy can fulfill."""
+    """Mark THIS pharmacy's claimed portion as fulfilled.
+    Per-vendor: each pharmacy fulfills independently. The order is only
+    globally COMPLETED when all claiming pharmacies have fulfilled."""
     order = session.get(Order, order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
-    if order.status not in (OrderStatus.CLAIMED, OrderStatus.PARTIAL):
-        raise HTTPException(status_code=400, detail="Order is not in a fulfillable state")
-    if order.claimed_by_pharmacy_id != body.pharmacy_id:
-        raise HTTPException(status_code=403, detail="Only the claiming pharmacy can fulfill this order")
 
-    order.status = OrderStatus.COMPLETED
+    # This pharmacy must have claimed something on this order.
+    claimed_entries = []
+    if order.claimed_medicines:
+        try:
+            claimed_entries = json.loads(order.claimed_medicines)
+        except (json.JSONDecodeError, AttributeError):
+            claimed_entries = []
+    my_entries = [e for e in claimed_entries if e.get("pharmacy_id") == body.pharmacy_id]
+    if not my_entries:
+        raise HTTPException(status_code=400, detail="You have not claimed any medicines on this order")
+
+    # Record this pharmacy's fulfillment.
+    fulfilled = []
+    if order.fulfilled_by:
+        try:
+            fulfilled = json.loads(order.fulfilled_by)
+        except (json.JSONDecodeError, AttributeError):
+            fulfilled = []
+    if body.pharmacy_id not in fulfilled:
+        fulfilled.append(body.pharmacy_id)
+    order.fulfilled_by = json.dumps(fulfilled)
+
+    # Globally completed only when every claiming pharmacy has fulfilled AND
+    # all medicines are claimed.
+    claiming_pharmacies = [e["pharmacy_id"] for e in claimed_entries]
+    all_claimed = _all_claimed_indices(order)
+    total = _total_medicines(order)
+    if all(p in fulfilled for p in claiming_pharmacies) and len(all_claimed) >= total:
+        order.status = OrderStatus.COMPLETED
+
     session.add(order)
     session.commit()
-    return {"status": "completed", "order_id": order.id}
+    return {"status": "fulfilled", "order_id": order.id, "globally_completed": order.status == OrderStatus.COMPLETED}

@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -33,7 +33,7 @@ async def claim_order(
         .values(
             status=OrderStatus.CLAIMED,
             claimed_by_pharmacy_id=pharmacy.id,
-            claimed_at=datetime.utcnow(),
+            claimed_at=datetime.now(timezone.utc),
         )
     )
     result = session.exec(stmt)

@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime, timezone
 from enum import Enum
 
 from sqlmodel import Field, Relationship, SQLModel
@@ -14,7 +14,7 @@ class OrderStatus(str, Enum):
 class User(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     phone_number: str = Field(index=True, unique=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     orders: list["Order"] = Relationship(back_populates="user")
 
@@ -46,7 +46,7 @@ class Order(SQLModel, table=True):
     location_lat: float | None = Field(default=None)
     location_long: float | None = Field(default=None)
     estimated_value: float | None = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     claimed_at: datetime | None = Field(default=None)
     claimed_by_pharmacy_id: int | None = Field(
         default=None, foreign_key="pharmacy.id", index=True

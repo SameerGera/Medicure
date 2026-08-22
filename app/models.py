@@ -39,6 +39,9 @@ class Order(SQLModel, table=True):
     status: OrderStatus = Field(default=OrderStatus.PENDING, index=True)
     # Raw LLM-extracted prescription payload (JSON string or free text).
     prescription_text: str | None = Field(default=None)
+    # Original incoming WhatsApp payload (body + media URLs) for the
+    # inference step. JSON-encoded.
+    raw_message: str | None = Field(default=None)
     estimated_value: float | None = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     claimed_at: datetime | None = Field(default=None)

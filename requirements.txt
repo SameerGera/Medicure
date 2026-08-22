@@ -6,3 +6,4 @@ openai
 httpx
 python-dotenv
 pydantic-settings
+python-multipart

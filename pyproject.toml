@@ -16,6 +16,7 @@ dependencies = [
     "httpx",
     "python-dotenv",
     "pydantic-settings",
+    "python-multipart",
 ]
 
 [project.optional-dependencies]

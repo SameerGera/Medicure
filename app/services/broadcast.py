@@ -1,6 +1,6 @@
 """Broadcast an order to nearby pharmacies via their webhook URLs."""
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 
@@ -27,7 +27,7 @@ async def broadcast_order(order: Order, pharmacies: list[Pharmacy]) -> list[dict
         "medicines": medicines,
         "estimated_value": order.estimated_value,
         "patient": {"lat": order.location_lat, "long": order.location_long},
-        "broadcast_at": datetime.utcnow().isoformat() + "Z",
+        "broadcast_at": datetime.now(timezone.utc).isoformat(),
         "claim_url": f"{settings.public_base_url}/claim/{order.id}",
     }
 

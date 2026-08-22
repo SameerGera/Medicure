@@ -2,6 +2,7 @@
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.database import create_db_and_tables
@@ -24,6 +25,11 @@ app.include_router(vendor.router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/")
+def root():
+    return RedirectResponse(url="/vendor/1")
 
 
 @app.get("/health")

@@ -1,11 +1,13 @@
 """Patient routing notifications.
 
 On a successful claim, sends the patient a WhatsApp message with the
-winning pharmacy's name, distance, and a Google Maps directions URL.
+winning pharmacy's name, phone number, distance, and Google Maps URL.
 
 Sending is best-effort: if Twilio credentials are absent, the message is
 logged (demo mode) instead of raising, so the claim still succeeds.
 """
+import json
+
 from app.config import get_settings
 from app.geo import haversine_km
 from app.models import Order, Pharmacy, User
@@ -40,12 +42,36 @@ async def route_patient_to_pharmacy(
             pharmacy.location_long,
         )
 
+    # Build the claimed-medicines summary for the patient.
+    med_summary = ""
+    try:
+        parsed = json.loads(order.prescription_text or "{}")
+        meds = parsed.get("medicines", [])
+        if meds:
+            lines = []
+            for i, m in enumerate(meds):
+                lines.append(f"  {i+1}. {m.get('name', 'Medicine')} x{m.get('quantity', 1)}")
+            med_summary = "\n".join(lines)
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
     text = (
         f"Your medicines are confirmed!\n"
+        f"\n"
         f"Pharmacy: {pharmacy.name}\n"
-        + (f"Distance: {distance:.1f} km\n" if distance is not None else "")
-        + f"Directions: {_maps_url(pharmacy)}\n"
-        f"Show order #{order.id} at the counter. Thank you for using Medicure."
+        f"Phone: {pharmacy.phone_number}\n"
+    )
+    if distance is not None:
+        text += f"Distance: {distance:.1f} km\n"
+    text += (
+        f"Location: {_maps_url(pharmacy)}\n"
+        f"\n"
+    )
+    if med_summary:
+        text += f"Medicines:\n{med_summary}\n\n"
+    text += (
+        f"Show order #{order.id} at the counter.\n"
+        f"Thank you for using Medicure."
     )
 
     await _send_whatsapp(user.phone_number, text)
@@ -66,5 +92,4 @@ async def _send_whatsapp(to_phone: str, body: str) -> None:
             body=body,
         )
     except Exception as exc:
-        # Never let a send failure break the claim.
         print(f"[notify:error] failed to message {to_phone}: {exc}")

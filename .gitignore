@@ -24,3 +24,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Project context (auto-saved, not source code)
+CONTEXT.md

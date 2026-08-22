@@ -6,6 +6,7 @@ from sqlmodel import Field, Relationship, SQLModel
 
 class OrderStatus(str, Enum):
     PENDING = "pending"
+    PARTIAL = "partial"
     CLAIMED = "claimed"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -51,6 +52,8 @@ class Order(SQLModel, table=True):
     claimed_by_pharmacy_id: int | None = Field(
         default=None, foreign_key="pharmacy.id", index=True
     )
+    # Partial-claim tracking. JSON: {"pharmacy_id": int, "medicines": [indices]}
+    claimed_medicines: str | None = Field(default=None)
 
     user: User | None = Relationship(back_populates="orders")
     claimed_by: Pharmacy | None = Relationship(back_populates="claimed_orders")

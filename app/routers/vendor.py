@@ -170,6 +170,20 @@ def demo_broadcast_all(session: Session = Depends(get_session)):
     }
 
 
+@router.get("/{pharmacy_id}")
+def dashboard(pharmacy_id: int, session: Session = Depends(get_session)):
+    ph = session.get(Pharmacy, pharmacy_id)
+    if ph is None:
+        raise HTTPException(status_code=404, detail="pharmacy not found")
+    html = (STATIC_DIR / "vendor.html").read_text(encoding="utf-8")
+    bootstrap = (
+        f"<script>const PID={pharmacy_id};"
+        f"const PHARMACY_NAME={json.dumps(ph.name)};</script>"
+    )
+    html = html.replace("<!--BOOTSTRAP-->", bootstrap)
+    return HTMLResponse(html)
+
+
 # --- Sub-path routes (registered AFTER the parent catch-all) ---
 
 @router.get("/{pharmacy_id}/orders")

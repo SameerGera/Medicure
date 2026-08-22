@@ -1,129 +1,154 @@
-﻿document.getElementById('phname').textContent = PHARMACY_NAME || 'Pharmacy';
-var box = document.getElementById('orders');
-var simBtn = document.getElementById('sim');
+﻿var state = '';
 var lastHash = '';
 
-function simulate() {
-  simBtn.disabled = true;
-  simBtn.textContent = 'Dispatching...';
-  fetch('/vendor/' + PID + '/simulate', { method: 'POST' })
-    .then(function(r) { if (r.ok) return poll(); })
-    .catch(function(e) { console.error(e); })
-    .finally(function() {
-      simBtn.disabled = false;
-      simBtn.textContent = 'Simulate incoming order';
-    });
+document.getElementById('phname').textContent = PHARMACY_NAME;
+
+function renderStatus(s, el) {
+  el.className = 'status ' + s;
+  if (s === 'won') el.textContent = 'You won';
+  else if (s === 'lost') el.textContent = 'Claimed by other';
+  else if (s === 'partial') el.textContent = 'Partially claimed';
+  else if (s === 'completed') el.textContent = 'Fulfilled';
+  else el.textContent = 'Pending';
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, function(c) {
-    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-  });
-}
-
-function renderMeds(meds, claimed) {
-  var claimedSet = {};
-  if (claimed && claimed.medicines) {
-    claimed.medicines.forEach(function(i) { claimedSet[i] = true; });
-  }
-  return meds.map(function(m, i) {
-    var checked = claimedSet[i] ? 'checked disabled' : '';
-    var cls = claimedSet[i] ? 'claimed-med' : '';
-    return '<li class="' + cls + '">'
-      + '<input type=checkbox class=med-check data-idx=' + i + ' ' + checked + '>'
-      + '<span class=med-name>' + escapeHtml(m.name || 'Medicine') + '</span>'
-      + '<span class=med-qty>x' + (m.quantity || 1) + '</span>'
-      + '</li>';
-  }).join('');
-}
-
-function render(list) {
-  if (!list.length) {
-    box.innerHTML = '<div class="empty">No incoming orders yet.<br>Share this screen - orders appear the moment a patient sends a prescription.</div>';
+function renderOrders(orders, activeTab) {
+  var c = document.getElementById('orders');
+  if (!orders || !orders.length) {
+    if (activeTab === 'history') {
+      c.innerHTML = '<div class=empty>No fulfilled orders yet.<br>Orders you\'ve completed will appear here.</div>';
+    } else {
+      c.innerHTML = '<div class=empty>No pending orders yet.<br>Tap <b>Simulate order</b> or <b>Demo broadcast</b> to start.</div>';
+    }
     return;
   }
-  box.innerHTML = list.map(function(o) {
-    var meds = renderMeds(o.medicines, o.claimed_medicines);
-    var dist = (o.distance_km != null)
-      ? '<span class="badge dist">' + o.distance_km + ' km away</span>' : '';
-    var val = (o.estimated_value != null)
-      ? '<span class="badge val">Rs ' + o.estimated_value + ' est.</span>' : '';
-    var badge = '';
-    var btnRow = '';
-    var status = '';
-    if (o.state === 'won') {
-      badge = '<span class="status won">YOU WON</span>';
-      btnRow = '<div class=btn-row><button class="btn" disabled>Claimed</button></div>';
-      status = 'Won by you';
-    } else if (o.state === 'lost') {
-      badge = '<span class="status lost">Claimed by another</span>';
-      btnRow = '<div class=btn-row><button class="btn" disabled>View</button></div>';
-      status = 'Lost';
-    } else if (o.state === 'partial') {
-      badge = '<span class="badge partial-badge">Partially claimed</span>';
-      btnRow = '<div class=btn-row>'
-        + '<button class="btn" onclick="claim(' + o.order_id + ', null, this)">Claim All Remaining</button>'
-        + '</div>';
-      status = 'Partial';
-    } else {
-      btnRow = '<div class=btn-row>'
-        + '<button class="btn" onclick="claim(' + o.order_id + ', null, this)">Claim All</button>'
-        + '<button class="btn btn-secondary" onclick="claimSelected(' + o.order_id + ', this)">Claim Selected</button>'
-        + '</div>';
+  var h = '';
+  for (var i = 0; i < orders.length; i++) {
+    var o = orders[i];
+    var cardClass = 'card ' + o.state;
+
+    var badges = '';
+    if (o.distance_km != null) badges += '<span class="badge dist">' + o.distance_km + ' km</span>';
+    if (o.estimated_value) badges += '<span class="badge val">~' + o.estimated_value + '</span>';
+    if (o.state === 'partial') {
+      var claimedHere = 0;
+      if (o.claimed_medicines) {
+        for (var j = 0; j < o.claimed_medicines.length; j++) {
+          if (o.claimed_medicines[j].pharmacy_id === PID) claimedHere = o.claimed_medicines[j].medicines.length;
+        }
+      }
+      badges += '<span class=badge partial-badge>' + claimedHere + ' claimed by you</span>';
     }
-    return '<div class="card ' + (o.state || '') + '">'
-      + '<div class="top"><div class="oid">Order #' + o.order_id + '</div>' + badge + '</div>'
-      + '<div class="badges">' + val + dist + '</div>'
-      + '<ul class=meds>' + meds + '</ul>'
-      + '<div class=foot><span class="status ' + (o.state || '') + '">' + status + '</span>' + btnRow + '</div>'
-      + '</div>';
-  }).join('');
+
+    var meds = o.medicines || [];
+    var ml = '';
+    for (var j = 0; j < meds.length; j++) {
+      var m = meds[j];
+      var isClaimed = false;
+      if (o.claimed_medicines) {
+        for (var k = 0; k < o.claimed_medicines.length; k++) {
+          if (o.claimed_medicines[k].medicines.indexOf(j) >= 0) { isClaimed = true; break; }
+        }
+      }
+      var liClass = isClaimed ? 'claimed-med' : '';
+      ml += '<li class=' + liClass + '><input type=checkbox class=med-check data-i=' + j + (isClaimed ? ' disabled checked' : '') + '><span class=med-name>' + m.name + '</span><span class=med-qty>x' + m.quantity + '</span></li>';
+    }
+
+    var actions = '';
+    if (o.state === 'pending' || o.state === 'partial') {
+      actions = '<button class=btn onclick="claim(' + o.order_id + ',false)">Claim all</button><button class=btn-sec onclick="claim(' + o.order_id + ',true)">Claim selected</button>';
+    } else if (o.state === 'won') {
+      actions = '<button class=btn-fulfill onclick="fulfill(' + o.order_id + ')">Fulfilled</button>';
+    }
+
+    h += '<div class="' + cardClass + '" id="card-' + o.order_id + '">'
+      + '<div class=top><span class=oid>Order #' + o.order_id + '</span>'
+      + '<span class=time>' + (o.received_at ? ago(o.received_at) : '') + '</span></div>'
+      + '<div class=badges>' + badges + '</div>'
+      + '<ul class=meds>' + ml + '</ul>'
+      + '<div class=foot><div class=status></div><div class=btn-row>' + actions + '</div></div></div>';
+  }
+  c.innerHTML = h;
+  var statusEls = c.querySelectorAll('.status');
+  for (var i = 0; i < statusEls.length; i++) {
+    renderStatus(orders[i].state, statusEls[i]);
+  }
+}
+
+function ago(ts) {
+  var d = Math.round(Date.now() / 1000 - ts);
+  if (d < 5) return 'just now';
+  if (d < 60) return d + 's ago';
+  if (d < 3600) return Math.floor(d / 60) + 'm ago';
+  return Math.floor(d / 3600) + 'h ago';
 }
 
 function poll() {
-  return fetch('/vendor/' + PID + '/orders')
+  fetch('/vendor/' + PID + '/orders?status=' + state)
     .then(function(r) { return r.json(); })
-    .then(function(d) {
-      var h = JSON.stringify(d);
+    .then(function(data) {
+      var h = JSON.stringify(data);
       if (h !== lastHash) {
         lastHash = h;
-        render(d);
+        renderOrders(data, state);
       }
-    })
-    .catch(function(e) { console.error(e); });
+    });
 }
 
-function claim(id, indices, btn) {
-  btn.disabled = true;
-  btn.textContent = 'Claiming...';
+function simulate() {
+  document.getElementById('sim').disabled = true;
+  fetch('/vendor/' + PID + '/simulate', { method: 'POST' })
+    .then(function() { lastHash = ''; poll(); })
+    .then(function() { document.getElementById('sim').disabled = false; });
+}
+
+function demoBroadcast() {
+  document.getElementById('demo').disabled = true;
+  document.getElementById('demo').textContent = 'Broadcasting...';
+  fetch('/vendor/demo/broadcast')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      lastHash = '';
+      poll();
+      document.getElementById('demo').textContent = 'Broadcast sent to ' + d.broadcast_to + ' vendors!';
+      setTimeout(function() {
+        document.getElementById('demo').disabled = false;
+        document.getElementById('demo').textContent = 'Demo broadcast to all vendors';
+      }, 2000);
+    });
+}
+
+function claim(orderId, partial) {
   var body = { pharmacy_id: PID };
-  if (indices !== null) body.medicine_indices = indices;
-  fetch('/claim/' + id, {
+  if (partial) {
+    var checks = document.querySelectorAll('#card-' + orderId + ' .med-check:checked:not(:disabled)');
+    var idx = [];
+    for (var i = 0; i < checks.length; i++) idx.push(parseInt(checks[i].getAttribute('data-i')));
+    if (!idx.length) { alert('Select at least one medicine.'); return; }
+    body.medicine_indices = idx;
+  }
+  fetch('/claim/' + orderId, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
-  }).then(function(r) {
-    if (r.ok) { btn.textContent = 'Claimed'; }
-    else {
-      return r.json().then(function(e) {
-        alert(e.detail || 'Claim failed');
-        btn.disabled = false;
-        btn.textContent = 'Claim Order';
-      });
-    }
-  }).finally(function() { poll(); });
+  }).then(function() { lastHash = ''; poll(); });
 }
 
-function claimSelected(id, btn) {
-  var card = btn.closest('.card');
-  var checks = card.querySelectorAll('.med-check:not(:checked):not(:disabled)');
-  var indices = [];
-  checks.forEach(function(c) { indices.push(parseInt(c.dataset.idx)); });
-  if (!indices.length) {
-    alert('Select at least one medicine to claim.');
-    return;
-  }
-  claim(id, indices, btn);
+function fulfill(orderId) {
+  fetch('/orders/' + orderId + '/fulfill', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pharmacy_id: PID })
+  }).then(function() { lastHash = ''; poll(); });
+}
+
+function switchTab(t) {
+  state = t === 'history' ? 'history' : '';
+  lastHash = '';
+  document.querySelectorAll('.tab').forEach(function(el) {
+    el.classList.toggle('active', el.getAttribute('data-tab') === t);
+  });
+  poll();
 }
 
 poll();

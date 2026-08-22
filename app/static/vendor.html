@@ -5,7 +5,7 @@
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>Medicure Vendor</title>
 <link rel=preconnect href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel=stylesheet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel=stylesheet href="/static/vendor.css">
 </head>
 <body>
@@ -20,8 +20,13 @@
 </header>
 <div id=wrap>
   <div class=bar>
-    <button id=sim class=btn onclick="simulate()">Simulate incoming order</button>
-    <span class=hint>for demo / testing without WhatsApp</span>
+    <button id=sim class=btn onclick="simulate()">Simulate order</button>
+    <button id=demo class=btn btn-demo onclick="demoBroadcast()">Demo broadcast to all vendors</button>
+    <span class=hint>for fastest-finger-first demo</span>
+  </div>
+  <div class=tabs>
+    <button class=tab active data-tab=active onclick="switchTab('active')">Active orders</button>
+    <button class=tab data-tab=history onclick="switchTab('history')">History</button>
   </div>
   <div id=orders></div>
 </div>

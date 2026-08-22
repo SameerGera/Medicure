@@ -1,10 +1,7 @@
+import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-import os
-
 
 _vercel_url = os.environ.get("VERCEL_URL", "")
 _default_base = (
@@ -34,4 +31,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

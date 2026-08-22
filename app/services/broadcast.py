@@ -1,49 +1,51 @@
-"""Broadcast an order to nearby pharmacies via their webhook URLs."""
-import json
-from datetime import datetime, timezone
+"""Broadcast an order to nearby pharmacies.
 
-import httpx
+Primary path: direct DB inserts (BroadcastReceipt rows).
+This works on Vercel serverless where the old HTTP-webhook approach
+failed because each request runs on a potentially different instance.
+"""
+from app.geo import all_active_pharmacies, find_nearby_pharmacies, haversine_km
+from app.models import BroadcastReceipt, Order, Pharmacy
+from sqlmodel import Session
 
-from app.config import get_settings
-from app.models import Order, Pharmacy
 
-BROADCAST_TIMEOUT = 5.0
+def broadcast_to_nearby(session: Session, order: Order) -> int:
+    """Insert BroadcastReceipt rows for all pharmacies within 5 km.
 
-
-async def broadcast_order(order: Order, pharmacies: list[Pharmacy]) -> list[dict]:
-    """POST the order payload to each pharmacy's registered webhook.
-
-    Returns a delivery report per pharmacy (status code or error).
+    Returns the number of pharmacies notified.
     """
-    settings = get_settings()
-    try:
-        parsed = json.loads(order.prescription_text or "{}")
-    except json.JSONDecodeError:
-        parsed = {}
-    medicines = parsed.get("medicines", [])
+    if order.location_lat is not None and order.location_long is not None:
+        pharmacies = find_nearby_pharmacies(
+            session, order.location_lat, order.location_long
+        )
+    else:
+        pharmacies = all_active_pharmacies(session)
 
-    payload = {
-        "order_id": order.id,
-        "medicines": medicines,
-        "estimated_value": order.estimated_value,
-        "patient": {"lat": order.location_lat, "long": order.location_long},
-        "broadcast_at": datetime.now(timezone.utc).isoformat(),
-        "claim_url": f"{settings.public_base_url}/claim/{order.id}",
-    }
-
-    report: list[dict] = []
-    async with httpx.AsyncClient(timeout=BROADCAST_TIMEOUT) as client:
-        for pharmacy in pharmacies:
-            if not pharmacy.webhook_url:
-                report.append(
-                    {"pharmacy_id": pharmacy.id, "status": "skipped_no_webhook"}
-                )
-                continue
-            try:
-                resp = await client.post(pharmacy.webhook_url, json=payload)
-                report.append(
-                    {"pharmacy_id": pharmacy.id, "status": resp.status_code}
-                )
-            except Exception as exc:  # network/timeout errors are non-fatal
-                report.append({"pharmacy_id": pharmacy.id, "error": str(exc)})
-    return report
+    count = 0
+    for ph in pharmacies:
+        dist = None
+        if (
+            order.location_lat is not None
+            and order.location_long is not None
+            and ph.location_lat is not None
+            and ph.location_long is not None
+        ):
+            dist = round(
+                haversine_km(
+                    order.location_lat,
+                    order.location_long,
+                    ph.location_lat,
+                    ph.location_long,
+                ),
+                1,
+            )
+        session.add(
+            BroadcastReceipt(
+                order_id=order.id,
+                pharmacy_id=ph.id,
+                distance_km=dist,
+            )
+        )
+        count += 1
+    session.commit()
+    return count

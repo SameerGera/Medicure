@@ -1,31 +1,14 @@
-import asyncio
+"""Handle incoming WhatsApp messages (Twilio webhook pipeline).
+
+Flow: upsert user → create order → Gemini inference → broadcast to pharmacies.
+"""
 import json
 
-from sqlmodel import select
+from sqlmodel import Session, select
 
-from app.database import engine
-from app.geo import all_active_pharmacies, find_nearby_pharmacies
-from app.models import Order, OrderStatus, Pharmacy, User
-from app.services.broadcast import broadcast_order
+from app.models import Order, OrderStatus, User
+from app.services.broadcast import broadcast_to_nearby
 from app.services.llm import run_inference
-from sqlmodel import Session
-
-
-async def _broadcast_later(order_id: int, lat: float | None, lon: float | None) -> None:
-    """Fire-and-forget broadcast that opens its own DB session.
-
-    Runs after the Twilio webhook has already responded, so Twilio never
-    times out and never retries (which would duplicate orders).
-    """
-    with Session(engine) as session:
-        order = session.get(Order, order_id)
-        if order is None:
-            return
-        if lat is not None and lon is not None:
-            nearby = find_nearby_pharmacies(session, lat, lon)
-        else:
-            nearby = all_active_pharmacies(session)
-        await broadcast_order(order, nearby)
 
 
 async def handle_incoming_message(
@@ -36,6 +19,7 @@ async def handle_incoming_message(
     lat: float | None = None,
     lon: float | None = None,
 ) -> Order:
+    # 1. Upsert user by phone number.
     user = session.exec(select(User).where(User.phone_number == phone)).first()
     if user is None:
         user = User(phone_number=phone)
@@ -43,6 +27,7 @@ async def handle_incoming_message(
         session.commit()
         session.refresh(user)
 
+    # 2. Create the order.
     order = Order(
         user_id=user.id,
         status=OrderStatus.PENDING,
@@ -54,11 +39,12 @@ async def handle_incoming_message(
     session.commit()
     session.refresh(order)
 
-    # Phase 3: extract medicines + AOV via the Vision LLM.
+    # 3. Extract medicines + AOV via the Vision LLM.
     await run_inference(session, order)
     session.refresh(order)
 
-    # Phase 4: trust-weighted broadcast, offloaded so Twilio gets an
-    # instant reply (see _broadcast_later for the actual delivery).
-    asyncio.create_task(_broadcast_later(order.id, lat, lon))
+    # 4. Broadcast to nearby pharmacies (direct DB insert — no background
+    #    task needed, works on Vercel serverless).
+    broadcast_to_nearby(session, order)
+
     return order

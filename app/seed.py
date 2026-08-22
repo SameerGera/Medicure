@@ -6,7 +6,7 @@ Usage:
 from sqlmodel import func, select
 
 from app.database import Session, create_db_and_tables, engine
-from app.models import Pharmacy
+from app.models import Pharmacy, User
 
 # Demo center: Koramangala, Bangalore. Vendors spread within ~5km.
 CENTER_LAT = 12.9352
@@ -25,6 +25,13 @@ SAMPLE_PHARMACIES = [
 def seed() -> None:
     create_db_and_tables()
     with Session(engine) as session:
+        # Seed a demo user (user_id=1) for simulate/demo broadcasts.
+        existing_users = session.exec(select(func.count()).select_from(User)).one()
+        if not existing_users:
+            session.add(User(phone_number="+910000000000"))
+            session.commit()
+            print("Seeded demo user.")
+
         existing = session.exec(select(func.count()).select_from(Pharmacy)).one()
         if existing:
             print(f"Pharmacies already present ({existing}); skipping seed.")

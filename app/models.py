@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timezone
+from datetime import datetime, timezone
 from enum import Enum
 
 from sqlmodel import Field, Relationship, SQLModel
@@ -59,3 +59,17 @@ class Order(SQLModel, table=True):
 
     user: User | None = Relationship(back_populates="orders")
     claimed_by: Pharmacy | None = Relationship(back_populates="claimed_orders")
+
+
+class BroadcastReceipt(SQLModel, table=True):
+    """Tracks which orders were broadcast to which pharmacies.
+
+    Replaces the in-memory RECEIVED dict so broadcasts survive Vercel
+    serverless cold starts and cross-instance requests.
+    """
+    id: int | None = Field(default=None, primary_key=True)
+    order_id: int = Field(foreign_key="order.id", index=True)
+    pharmacy_id: int = Field(foreign_key="pharmacy.id", index=True)
+    distance_km: float | None = Field(default=None)
+    received_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+

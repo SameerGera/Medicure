@@ -1,4 +1,4 @@
-﻿import json
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -180,25 +180,48 @@ def fulfill_order(
     if not my_entries:
         raise HTTPException(status_code=400, detail="You have not claimed any medicines on this order")
 
-    # Record this pharmacy's fulfillment.
+    # Idempotency: check if already fulfilled.
     fulfilled = []
     if order.fulfilled_by:
         try:
             fulfilled = json.loads(order.fulfilled_by)
         except (json.JSONDecodeError, AttributeError):
             fulfilled = []
-    if body.pharmacy_id not in fulfilled:
-        fulfilled.append(body.pharmacy_id)
-    order.fulfilled_by = json.dumps(fulfilled)
+    if body.pharmacy_id in fulfilled:
+        raise HTTPException(status_code=409, detail="Already fulfilled by this pharmacy")
+
+    fulfilled.append(body.pharmacy_id)
+    new_fulfilled = json.dumps(fulfilled)
 
     # Globally completed only when every claiming pharmacy has fulfilled AND
     # all medicines are claimed.
-    claiming_pharmacies = [e["pharmacy_id"] for e in claimed_entries]
+    claiming_pharmacies = {e["pharmacy_id"] for e in claimed_entries}
     all_claimed = _all_claimed_indices(order)
     total = _total_medicines(order)
-    if all(p in fulfilled for p in claiming_pharmacies) and len(all_claimed) >= total:
-        order.status = OrderStatus.COMPLETED
+    globally_done = (
+        all(p in fulfilled for p in claiming_pharmacies)
+        and len(all_claimed) >= total
+    )
+    new_status = OrderStatus.COMPLETED if globally_done else order.status
 
-    session.add(order)
+    # Atomic update — prevents lost writes from concurrent fulfill calls.
+    old_fulfilled = order.fulfilled_by  # what we read
+    stmt = (
+        update(Order)
+        .where(
+            Order.id == order_id,
+            Order.fulfilled_by == old_fulfilled,  # optimistic lock
+        )
+        .values(fulfilled_by=new_fulfilled, status=new_status)
+    )
+    result = session.exec(stmt)
     session.commit()
-    return {"status": "fulfilled", "order_id": order.id, "globally_completed": order.status == OrderStatus.COMPLETED}
+
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Concurrent fulfill detected — please retry.",
+        )
+
+    return {"status": "fulfilled", "order_id": order.id, "globally_completed": new_status == OrderStatus.COMPLETED}
+

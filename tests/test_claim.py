@@ -58,7 +58,7 @@ def test_per_vendor_state_is_independent():
     """A vendor's fulfilled order must not appear as 'completed' for another
     vendor who never interacted. Each vendor has an independent view."""
     with TestClient(app) as c:
-        c.get("/vendor/setup")
+        # Demo broadcast creates the order and BroadcastReceipt rows in DB.
         demo = c.get("/vendor/demo/broadcast").json()
         oid = demo["order_id"]
         total_meds = len(demo["medicines"])
@@ -83,3 +83,14 @@ def test_per_vendor_state_is_independent():
         r2 = c.post(f"/claim/{oid}", json={"pharmacy_id": 2, "medicine_indices": remaining})
         assert r2.status_code == 200
         assert r2.json()["medicines_remaining"] == 0
+
+
+def test_fulfill_idempotency():
+    """Double-fulfilling should return 409."""
+    oid = _new_order()
+    with TestClient(app) as c:
+        c.post(f"/claim/{oid}", json={"pharmacy_id": 5})
+        r1 = c.post(f"/orders/{oid}/fulfill", json={"pharmacy_id": 5})
+        assert r1.status_code == 200
+        r2 = c.post(f"/orders/{oid}/fulfill", json={"pharmacy_id": 5})
+        assert r2.status_code == 409

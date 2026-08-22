@@ -9,6 +9,7 @@ from sqlmodel import Session
 
 from app.config import get_settings
 from app.database import get_session
+from app.models import OrderStatus
 from app.services.ingest import handle_incoming_message
 
 router = APIRouter(prefix="/webhook", tags=["ingestion"])
@@ -123,6 +124,31 @@ async def telegram_webhook(
     body = message.get("text") or message.get("caption") or ""
     media_urls = []
 
+    # Handle greetings & commands without creating phantom orders
+    body_clean = body.strip().lower()
+    if body_clean in ("/start", "/help", "start", "help", "hi", "hello") and not message.get("photo"):
+        if settings.telegram_bot_token:
+            try:
+                send_url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    await client.post(
+                        send_url,
+                        json={
+                            "chat_id": chat_id,
+                            "text": (
+                                "👋 *Welcome to Medicure!*\n\n"
+                                "To order medicines:\n"
+                                "• 💊 *Type medicine names & quantities* (e.g. `Dolo 650 x4, Pantoprazole 40mg x2`)\n"
+                                "• 📷 *Or send a photo* of your prescription\n\n"
+                                "We'll instantly match you with the nearest trusted pharmacies in real time!"
+                            ),
+                            "parse_mode": "Markdown",
+                        },
+                    )
+            except Exception:
+                pass
+        return {"ok": True}
+
     if message.get("photo") and settings.telegram_bot_token:
         best_photo = message["photo"][-1]
         file_id = best_photo.get("file_id")
@@ -150,18 +176,29 @@ async def telegram_webhook(
     if settings.telegram_bot_token:
         try:
             send_url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+            if order.status == OrderStatus.FAILED:
+                reply_text = (
+                    "⚠️ *No medicines detected.*\n\n"
+                    "Please reply with medicine names & quantities (e.g. `Dolo 650 x2, Amoxicillin 250mg x1`) "
+                    "or upload a clearer photo of your prescription."
+                )
+            else:
+                reply_text = f"💊 *Received your prescription (Order #{order.id})!*\nScanning nearby pharmacies..."
+
             async with httpx.AsyncClient(timeout=5.0) as client:
                 await client.post(
                     send_url,
                     json={
                         "chat_id": chat_id,
-                        "text": f"💊 Received your prescription (Order #{order.id})!\nScanning nearby pharmacies...",
+                        "text": reply_text,
+                        "parse_mode": "Markdown",
                     },
                 )
         except Exception:
             pass
 
     return {"ok": True, "order_id": order.id}
+
 
 
 @router.get("/telegram/setup")

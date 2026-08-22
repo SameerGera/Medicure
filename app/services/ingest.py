@@ -43,8 +43,23 @@ async def handle_incoming_message(
     await run_inference(session, order)
     session.refresh(order)
 
-    # 4. Broadcast to nearby pharmacies (direct DB insert — no background
-    #    task needed, works on Vercel serverless).
+    # 4. If no medicines were found, mark as FAILED and do not broadcast.
+    med_count = 0
+    try:
+        parsed = json.loads(order.prescription_text or "{}")
+        med_count = len(parsed.get("medicines", []))
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+    if med_count == 0:
+        order.status = OrderStatus.FAILED
+        session.add(order)
+        session.commit()
+        session.refresh(order)
+        return order
+
+    # 5. Broadcast to nearby pharmacies (direct DB insert).
     broadcast_to_nearby(session, order)
 
     return order
+

@@ -50,7 +50,11 @@ async def claim_order(
         raise HTTPException(status_code=404, detail="Order not found")
 
     total = _total_medicines(order)
+    if total == 0:
+        raise HTTPException(status_code=400, detail="Order contains no medicines to claim.")
+
     already_claimed = _all_claimed_indices(order)
+
 
     # An order can be claimed as long as there are unclaimed medicines.
     # Status COMPLETED means a pharmacy fulfilled their part, but other

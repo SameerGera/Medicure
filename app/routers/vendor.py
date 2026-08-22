@@ -166,8 +166,13 @@ def vendor_orders(
     out = []
     for receipt in receipts:
         order = session.get(Order, receipt.order_id)
-        if order is None:
+        if order is None or order.status == OrderStatus.FAILED:
             continue
+
+        total = _total_medicines(order)
+        if total == 0:
+            continue
+
 
         # Compute display state RELATIVE TO THIS pharmacy.
         # Each vendor has an independent view of the same broadcast order.

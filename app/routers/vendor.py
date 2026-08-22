@@ -194,27 +194,33 @@ def vendor_orders(
         i_fulfilled = pharmacy_id in fulfilled
         i_claimed = len(my_claimed_entries) > 0
 
+        my_claimed_meds = set()
+        for e in my_claimed_entries:
+            my_claimed_meds.update(e.get("medicines", []))
+
+        total = _total_medicines(order)
+        all_claimed = _all_claimed_indices(order)
+
         if i_claimed and i_fulfilled:
-            state = "completed"      # I fulfilled my part -> done for me
+            state = "completed"      # I fulfilled my part -> in my history
+        elif i_claimed and len(my_claimed_meds) >= total and total > 0:
+            state = "won"            # I claimed all medicines -> "You won", shows Fulfilled button
         elif i_claimed and not i_fulfilled:
-            state = "partial"        # I claimed, can still fulfill
+            state = "partial"        # I claimed a subset -> shows Fulfilled button
+        elif len(all_claimed) >= total and total > 0:
+            state = "lost"           # Taken by other pharmacies
         else:
-            # I never claimed anything on this order.
-            all_claimed = _all_claimed_indices(order)
-            total = _total_medicines(order)
-            if len(all_claimed) >= total and total > 0:
-                state = "lost"       # everything taken by others
-            else:
-                state = "pending"    # still medicines available for me
+            state = "pending"        # Available for me to claim
 
         # Filter based on status query
-        # "lost" orders where we never claimed → skip entirely (not our history)
+        # "lost" orders where we never claimed → skip from both tabs
         if state == "lost":
             continue
         if status == "active" and state == "completed":
             continue
         if status == "history" and state != "completed":
             continue
+
 
         claimed_medicines = None
         if order.claimed_medicines:

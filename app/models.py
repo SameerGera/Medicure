@@ -42,6 +42,9 @@ class Order(SQLModel, table=True):
     # Original incoming WhatsApp payload (body + media URLs) for the
     # inference step. JSON-encoded.
     raw_message: str | None = Field(default=None)
+    # Patient location (from a shared WhatsApp location, if provided).
+    location_lat: float | None = Field(default=None)
+    location_long: float | None = Field(default=None)
     estimated_value: float | None = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     claimed_at: datetime | None = Field(default=None)

@@ -25,8 +25,18 @@ async def twilio_webhook(
         if form.get(f"MediaUrl{i}")
     ]
 
+    lat_raw = form.get("Latitude")
+    lon_raw = form.get("Longitude")
+    lat = float(str(lat_raw)) if lat_raw else None
+    lon = float(str(lon_raw)) if lon_raw else None
+
     order = await handle_incoming_message(
-        session=session, phone=phone, body=body, media_urls=media_urls
+        session=session,
+        phone=phone,
+        body=body,
+        media_urls=media_urls,
+        lat=lat,
+        lon=lon,
     )
 
     # Twilio expects a TwiML response. We acknowledge now; the patient
